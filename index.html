@@ -14,12 +14,12 @@
   .ad-btn { background:linear-gradient(45deg,#ffd700,#ffaa00); color:#000; font-weight:bold; }
   .status { padding:16px; background:#001122; border-radius:10px; font-size:18px; margin:10px 0; }
   canvas { width:100%; height:180px; background:#000; border:2px solid var(--cyan); border-radius:12px; margin:12px 0; }
-  textarea { width:100%; background:#000; color:#0ff; border:1px solid #0ff; padding:12px; font-size:16px; border-radius:8px; min-height:180px; }
+  textarea { width:100%; background:#000; color:#0ff; border:1px solid #0ff; padding:12px; font-size:16px; border-radius:8px; min-height:200px; }
 </style>
 </head>
 <body>
 <h1>YOUDUB 2025</h1>
-<p style="color:#ff00ff;">Beat • Record • Transcribe</p>
+<p style="color:#ff00ff;">Beat + Auto Transcription</p>
 
 <div class="card">
   <strong>💎 Credits: <span id="creditDisplay">25</span></strong><br><br>
@@ -37,24 +37,24 @@
 <div class="card">
   <h2>Waveform + Loop</h2>
   <canvas id="wave" width="800" height="180"></canvas>
-  <div style="margin:8px 0;">
-    Start: <input type="number" id="loopStart" step="0.01" value="0">s &nbsp;&nbsp;
+  <div>
+    Start: <input type="number" id="loopStart" step="0.01" value="0">s &nbsp;
     End: <input type="number" id="loopEnd" step="0.01" value="30">s
   </div>
   <button id="loopBtn" onclick="toggleLoop()">LOOP: OFF</button>
 </div>
 
 <div class="card">
-  <button onclick="play()" class="big">▶ PLAY / LOOP</button>
+  <button onclick="play()" class="big">▶ PLAY BEAT + AUTO TRANSCRIBE</button>
   <button onclick="pause()">PAUSE</button>
   <button onclick="stop()">STOP</button>
 </div>
 
 <div class="card">
-  <h2>Live Transcription</h2>
-  <button onclick="startFastRapMode()" class="big" style="background:#ff5500">⚡ FAST RAP MODE</button>
-  <button onclick="stopLyricsCapture()">STOP</button>
-  <textarea id="lyricsOutput" rows="10" placeholder="Your lyrics will appear here..."></textarea>
+  <h2>Transcription</h2>
+  <button onclick="manualStartTranscription()" style="background:#ff5500">🎤 MANUAL TRANSCRIPTION</button>
+  <button onclick="stopTranscription()">STOP TRANSCRIPTION</button>
+  <textarea id="lyricsOutput" rows="11" placeholder="Lyrics will appear here automatically when you play..."></textarea>
 </div>
 
 <script>
@@ -62,7 +62,7 @@
 let credits = 25;
 function updateCredits() { document.getElementById('creditDisplay').textContent = credits; }
 
-// ====================== AUDIO CORE ======================
+// ====================== AUDIO ======================
 let ctx, buffer, source, gainNode;
 let isPlaying = false, isLooping = false;
 let loopStart = 0, loopEnd = 30, duration = 0;
@@ -98,7 +98,7 @@ async function loadAudio(arrayBuf) {
   loopEnd = Math.min(30, duration);
   document.getElementById('loopEnd').value = loopEnd.toFixed(2);
   drawWaveform();
-  document.getElementById('status').textContent = `✅ Loaded ${duration.toFixed(1)}s`;
+  document.getElementById('status').textContent = `✅ Loaded ${duration.toFixed(1)}s beat`;
 }
 
 async function playSample() {
@@ -109,18 +109,16 @@ async function playSample() {
   } catch(e) { document.getElementById('status').textContent = "Demo failed"; }
 }
 
-// Waveform with real-time playhead
-function drawWaveform(currentTime = 0) {
+// Waveform + Playhead
+function drawWaveform(current = 0) {
   const canvas = document.getElementById('wave');
   const c = canvas.getContext('2d');
   c.fillStyle = '#000'; c.fillRect(0,0,canvas.width,canvas.height);
-  
   if (!buffer) return;
 
   const data = buffer.getChannelData(0);
   const step = Math.ceil(data.length / canvas.width);
   c.strokeStyle = '#0f0'; c.lineWidth = 2; c.beginPath();
-  
   for (let i = 0; i < canvas.width; i++) {
     let sum = 0;
     for (let j = 0; j < step; j++) sum += Math.abs(data[i*step + j] || 0);
@@ -131,15 +129,13 @@ function drawWaveform(currentTime = 0) {
 
   // Playhead
   if (isPlaying && duration) {
-    const x = (currentTime / duration) * canvas.width;
+    const x = (current / duration) * canvas.width;
     c.strokeStyle = '#00ffff'; c.lineWidth = 3;
-    c.beginPath();
-    c.moveTo(x, 0); c.lineTo(x, canvas.height);
-    c.stroke();
+    c.beginPath(); c.moveTo(x, 0); c.lineTo(x, canvas.height); c.stroke();
   }
 }
 
-// Playback with real-time update
+// Play + Auto Transcription
 async function play() {
   if (!buffer) return document.getElementById('status').textContent = "Load a beat first";
   await initAudio(); stop();
@@ -155,7 +151,7 @@ async function play() {
   source.start(0, isLooping ? loopStart : 0);
   isPlaying = true;
 
-  const startTime = ctx.currentTime - (isLooping ? loopStart : 0);
+  const startTime = ctx.currentTime;
 
   function update() {
     if (!isPlaying) return;
@@ -166,13 +162,17 @@ async function play() {
   }
   update();
 
-  document.getElementById('status').textContent = isLooping ? 'LOOPING' : 'Playing';
+  // Auto start transcription when playing
+  startTranscription();
+
+  document.getElementById('status').textContent = isLooping ? 'LOOPING + TRANSCRIBING' : 'Playing + Transcribing';
 }
 
 function stop() {
   if (source) source.stop();
   isPlaying = false;
   cancelAnimationFrame(animationFrame);
+  stopTranscription();
   drawWaveform(0);
   document.getElementById('status').textContent = 'Stopped';
 }
@@ -184,10 +184,13 @@ function toggleLoop() {
   document.getElementById('loopBtn').textContent = isLooping ? 'LOOP: ON' : 'LOOP: OFF';
 }
 
-// Transcription
-function startFastRapMode() {
+// ====================== TRANSCRIPTION ======================
+function startTranscription() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) return alert("Please use Chrome browser");
+  if (!SpeechRecognition) {
+    document.getElementById('status').textContent = "Transcription not supported in this browser";
+    return;
+  }
 
   recognition = new SpeechRecognition();
   recognition.continuous = true;
@@ -199,19 +202,29 @@ function startFastRapMode() {
   recognition.onresult = (event) => {
     let interim = "";
     for (let i = event.resultIndex; i < event.results.length; i++) {
-      if (event.results[i].isFinal) finalText += event.results[i][0].transcript + " ";
-      else interim = event.results[i][0].transcript;
+      if (event.results[i].isFinal) {
+        finalText += event.results[i][0].transcript + " ";
+      } else {
+        interim = event.results[i][0].transcript;
+      }
     }
     document.getElementById('lyricsOutput').value = finalText + interim;
+    document.getElementById('lyricsOutput').scrollTop = 999999;
   };
 
+  recognition.onerror = (e) => console.log("Speech error:", e.error);
   recognition.start();
-  document.getElementById('status').textContent = "🎤 Listening... (Fast Mode)";
 }
 
-function stopLyricsCapture() {
-  if (recognition) recognition.stop();
-  document.getElementById('status').textContent = "Transcription stopped";
+function manualStartTranscription() {
+  startTranscription();
+}
+
+function stopTranscription() {
+  if (recognition) {
+    recognition.stop();
+    recognition = null;
+  }
 }
 
 // Init
