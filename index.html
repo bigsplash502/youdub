@@ -2,29 +2,21 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>YOUDUB 2025 • AI Music Studio</title>
+<title>YOUDUB 2025</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
-  :root { --cyan:#0ff; --pink:#ff0066; --purple:#9e00ff; }
-  body { margin:0; padding:15px; background:linear-gradient(135deg,#000022,#220044); color:var(--cyan); font-family:system-ui,sans-serif; text-align:center; }
+  body { margin:0; padding:15px; background:linear-gradient(135deg,#000022,#220044); color:#0ff; font-family:system-ui,sans-serif; text-align:center; }
   h1 { font-size:2.8em; text-shadow:0 0 20px #0ff; margin:10px 0; }
-  .card { background:rgba(0,20,60,0.9); border:2px solid var(--cyan); border-radius:16px; padding:20px; margin:15px auto; max-width:960px; box-shadow:0 0 30px rgba(0,255,255,0.3); }
-  button { padding:14px 28px; margin:8px; font-size:17px; cursor:pointer; background:linear-gradient(45deg,var(--pink),var(--purple)); color:white; border:none; border-radius:12px; }
-  .big { padding:18px 50px; font-size:22px; background:linear-gradient(45deg,#00ff00,#00cc00); }
-  .ad-btn { background:linear-gradient(45deg,#ffd700,#ffaa00); color:#000; font-weight:bold; }
+  .card { background:rgba(0,20,60,0.9); border:2px solid #0ff; border-radius:16px; padding:20px; margin:15px auto; max-width:960px; }
+  button { padding:14px 28px; margin:8px; font-size:17px; cursor:pointer; background:linear-gradient(45deg,#ff0066,#9e00ff); color:white; border:none; border-radius:12px; }
+  .big { padding:18px 50px; font-size:22px; background:linear-gradient(#0f0,#0a0); }
   .status { padding:16px; background:#001122; border-radius:10px; font-size:18px; margin:10px 0; }
-  canvas { width:100%; height:190px; background:#000; border:2px solid var(--cyan); border-radius:12px; margin:12px 0; }
-  textarea { width:100%; background:#000; color:#0ff; border:1px solid #0ff; padding:12px; font-size:16.5px; border-radius:8px; min-height:200px; }
+  canvas { width:100%; height:200px; background:#000; border:2px solid #0ff; border-radius:12px; margin:12px 0; }
+  textarea { width:100%; height:280px; background:#000; color:#0ff; border:1px solid #0ff; padding:12px; font-size:16px; text-align:left; }
 </style>
 </head>
 <body>
 <h1>YOUDUB 2025</h1>
-<p style="color:#ff00ff;">Beat + Auto Transcription</p>
-
-<div class="card">
-  <strong>💎 Credits: <span id="creditDisplay">25</span></strong><br><br>
-  <button onclick="watchAd()" class="ad-btn">🔥 WATCH AD → +15 Credits</button>
-</div>
 
 <div class="card">
   <h2>Load Beat</h2>
@@ -35,38 +27,49 @@
 </div>
 
 <div class="card">
-  <h2>Waveform + Loop</h2>
-  <canvas id="wave" width="800" height="190"></canvas>
-  <div>
-    Start: <input type="number" id="loopStart" step="0.01" value="0">s &nbsp;&nbsp;
-    End: <input type="number" id="loopEnd" step="0.01" value="30">s
-  </div>
-  <button id="loopBtn" onclick="toggleLoop()">LOOP: OFF</button>
+  <h2>Waveform</h2>
+  <canvas id="wave" width="800" height="200"></canvas>
 </div>
 
 <div class="card">
-  <button onclick="play()" class="big">▶ PLAY BEAT + AUTO TRANSCRIBE</button>
+  <button onclick="play()" class="big">▶ PLAY + AUTO TRANSCRIBE</button>
   <button onclick="stop()">STOP</button>
 </div>
 
 <div class="card">
-  <h2>Live Transcription</h2>
-  <button onclick="manualStart()" style="background:#ff5500">🎤 MANUAL TRANSCRIBE</button>
-  <button onclick="stopTranscription()">STOP TRANSCRIBE</button>
-  <textarea id="lyricsOutput" rows="10" placeholder="Lyrics will appear here..."></textarea>
+  <h2>Live Timestamped Transcription</h2>
+  <button onclick="manualStart()" style="background:#ff5500">🎤 MANUAL START</button>
+  <button onclick="stopTranscription()">STOP</button>
+  <textarea id="lyricsOutput" readonly placeholder="Timed lyrics will appear here..."></textarea>
 </div>
 
 <script>
-// Credits
-let credits = 25;
-function updateCredits() { document.getElementById('creditDisplay').textContent = credits; }
-
-// Audio Variables
 let ctx, buffer, source, gainNode;
-let isPlaying = false, isLooping = false;
-let loopStart = 0, loopEnd = 30, duration = 0;
+let isPlaying = false;
 let animationFrame = null;
 let recognition = null;
+let startTime = 0;
+let lyricsLog = [];
+
+// File Upload + Load
+document.getElementById('file').onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById('status').textContent = `Loading ${file.name}...`;
+  try {
+    const buf = await file.arrayBuffer();
+    await loadAudio(buf);
+  } catch(err) {
+    document.getElementById('status').textContent = "Failed to load";
+  }
+};
+
+async function loadAudio(arrayBuf) {
+  await initAudio();
+  buffer = await ctx.decodeAudioData(arrayBuf);
+  document.getElementById('status').textContent = `Loaded ${buffer.duration.toFixed(1)}s`;
+  drawWaveform();
+}
 
 async function initAudio() {
   if (!ctx) {
@@ -77,41 +80,18 @@ async function initAudio() {
   await ctx.resume();
 }
 
-// File Upload
-document.getElementById('file').onchange = async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  document.getElementById('status').textContent = `Loading ${file.name}...`;
-  try {
-    const buf = await file.arrayBuffer();
-    await loadAudio(buf);
-  } catch(err) {
-    document.getElementById('status').textContent = "❌ Failed to load file";
-  }
-};
-
-async function loadAudio(arrayBuf) {
-  await initAudio();
-  buffer = await ctx.decodeAudioData(arrayBuf);
-  duration = buffer.duration;
-  loopEnd = Math.min(30, duration);
-  document.getElementById('loopEnd').value = loopEnd.toFixed(2);
-  drawWaveform();
-  document.getElementById('status').textContent = `✅ Loaded ${duration.toFixed(1)}s`;
-}
-
 async function playSample() {
   document.getElementById('status').textContent = "Loading demo...";
   try {
     const resp = await fetch('https://freesound.org/data/previews/612/612095_5674468-lq.mp3');
     await loadAudio(await resp.arrayBuffer());
   } catch(e) {
-    document.getElementById('status').textContent = "Demo failed - upload manually";
+    document.getElementById('status').textContent = "Demo failed";
   }
 }
 
-// Waveform with Playhead
-function drawWaveform(currentTime = 0) {
+// Waveform + Playhead
+function drawWaveform(current = 0) {
   const canvas = document.getElementById('wave');
   const c = canvas.getContext('2d');
   c.fillStyle = '#000'; c.fillRect(0,0,canvas.width,canvas.height);
@@ -128,36 +108,28 @@ function drawWaveform(currentTime = 0) {
   }
   c.stroke();
 
-  if (isPlaying && duration) {
-    const x = (currentTime / duration) * canvas.width;
+  if (isPlaying) {
+    const x = (current / buffer.duration) * canvas.width;
     c.strokeStyle = '#00ffff'; c.lineWidth = 4;
     c.beginPath(); c.moveTo(x, 0); c.lineTo(x, canvas.height); c.stroke();
   }
 }
 
-// Play + Auto Transcription
+// Play
 async function play() {
   if (!buffer) return document.getElementById('status').textContent = "Load a beat first";
   await initAudio(); stop();
 
   source = ctx.createBufferSource();
   source.buffer = buffer;
-  if (isLooping) {
-    source.loop = true;
-    source.loopStart = loopStart;
-    source.loopEnd = loopEnd;
-  }
   source.connect(gainNode);
-  source.start(0, isLooping ? loopStart : 0);
+  source.start();
   isPlaying = true;
-
-  const startTime = ctx.currentTime;
+  startTime = ctx.currentTime;
 
   function update() {
     if (!isPlaying) return;
-    const elapsed = ctx.currentTime - startTime;
-    const current = isLooping ? (elapsed % (loopEnd - loopStart)) + loopStart : elapsed;
-    drawWaveform(current);
+    drawWaveform(ctx.currentTime - startTime);
     animationFrame = requestAnimationFrame(update);
   }
   update();
@@ -175,12 +147,7 @@ function stop() {
   document.getElementById('status').textContent = "Stopped";
 }
 
-function toggleLoop() {
-  isLooping = !isLooping;
-  document.getElementById('loopBtn').textContent = isLooping ? 'LOOP: ON' : 'LOOP: OFF';
-}
-
-// Transcription
+// ====================== TRANSCRIPTION WITH TIMESTAMPS ======================
 function startTranscription() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return;
@@ -190,12 +157,18 @@ function startTranscription() {
   recognition.interimResults = true;
   recognition.lang = 'en-US';
 
-  recognition.onresult = (e) => {
-    let text = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      text += e.results[i][0].transcript + ' ';
+  recognition.onresult = (event) => {
+    let interim = "";
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      if (event.results[i].isFinal) {
+        const time = (ctx.currentTime - startTime).toFixed(1);
+        const line = `[${time}s] ${event.results[i][0].transcript}`;
+        lyricsLog.push(line);
+        document.getElementById('lyricsOutput').value = lyricsLog.join('\n');
+      } else {
+        interim = event.results[i][0].transcript;
+      }
     }
-    document.getElementById('lyricsOutput').value = text;
   };
 
   recognition.start();
@@ -210,7 +183,6 @@ function stopTranscription() {
 }
 
 // Init
-updateCredits();
 playSample();
 </script>
 </body>
