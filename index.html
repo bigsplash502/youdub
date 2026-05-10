@@ -9,7 +9,7 @@
   h1 { font-size:2.8em; text-shadow:0 0 20px #0ff; margin:10px 0; }
   .card { background:rgba(0,20,60,0.9); border:2px solid #0ff; border-radius:16px; padding:20px; margin:15px auto; max-width:900px; }
   button { padding:14px 30px; margin:8px; font-size:18px; background:linear-gradient(45deg,#ff0066,#9e00ff); color:white; border:none; border-radius:12px; }
-  .big { font-size:22px; padding:18px 50px; background:linear-gradient(#0f0,#0a0); }
+  .big { padding:18px 50px; font-size:22px; background:linear-gradient(#0f0,#0a0); }
   .status { padding:16px; background:#001122; border-radius:10px; font-size:18px; margin:10px 0; }
   canvas { width:100%; height:200px; background:#000; border:2px solid #0ff; border-radius:12px; margin:12px 0; }
   textarea { width:100%; height:220px; background:#000; color:#0ff; border:1px solid #0ff; padding:12px; font-size:17px; }
@@ -21,7 +21,7 @@
 <div class="card">
   <h2>Load Beat</h2>
   <input type="file" id="file" accept="audio/*" style="display:none">
-  <button onclick="document.getElementById('file').click()">UPLOAD BEAT</button>
+  <button onclick="document.getElementById('file').click()">📁 UPLOAD BEAT</button>
   <button onclick="playSample()" class="big">LOAD DEMO</button>
   <div class="status" id="status">Ready</div>
 </div>
@@ -37,10 +37,10 @@
 </div>
 
 <div class="card">
-  <h2>Live Transcription</h2>
-  <button onclick="manualTranscription()" style="background:#ff5500">🎤 MANUAL TRANSCRIBE</button>
-  <button onclick="stopTranscription()">STOP TRANSCRIBE</button>
-  <textarea id="lyricsOutput" placeholder="Lyrics appear here..."></textarea>
+  <h2>Transcription</h2>
+  <button onclick="manualStart()" style="background:#ff5500">🎤 MANUAL START</button>
+  <button onclick="stopTranscription()">STOP</button>
+  <textarea id="lyricsOutput" placeholder="Lyrics will appear here..."></textarea>
 </div>
 
 <script>
@@ -48,9 +48,7 @@ let ctx, buffer, source, gainNode;
 let isPlaying = false;
 let animationFrame = null;
 let recognition = null;
-let startTime = 0;
 
-// Init Audio
 async function initAudio() {
   if (!ctx) {
     ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -69,45 +67,39 @@ document.getElementById('file').onchange = async (e) => {
     const buf = await file.arrayBuffer();
     await loadAudio(buf);
   } catch(err) {
-    document.getElementById('status').textContent = "Failed to load file";
+    document.getElementById('status').textContent = "❌ Failed to load";
   }
 };
 
 async function loadAudio(arrayBuf) {
   await initAudio();
   buffer = await ctx.decodeAudioData(arrayBuf);
-  document.getElementById('status').textContent = `Loaded ${buffer.duration.toFixed(1)}s`;
+  document.getElementById('status').textContent = `✅ Loaded ${buffer.duration.toFixed(1)}s`;
   drawWaveform();
 }
 
 async function playSample() {
   document.getElementById('status').textContent = "Loading demo...";
   try {
-    const resp = await fetch('https://www.learningcontainer.com/wp-content/uploads/2020/02/Kalimba.mp3');
+    // Reliable CORS-friendly short clip
+    const resp = await fetch('https://freesound.org/data/previews/612/612095_5674468-lq.mp3');
     await loadAudio(await resp.arrayBuffer());
   } catch(e) {
-    document.getElementById('status').textContent = "Demo failed - upload manually";
+    document.getElementById('status').textContent = "Demo failed - upload your own file";
   }
 }
 
-// Draw Waveform + Playhead
+// Waveform + Playhead
 function drawWaveform(currentTime = 0) {
   const canvas = document.getElementById('wave');
   const c = canvas.getContext('2d');
   c.fillStyle = '#000'; c.fillRect(0,0,canvas.width,canvas.height);
 
-  if (!buffer) {
-    c.fillStyle = '#0ff';
-    c.font = '20px monospace';
-    c.textAlign = 'center';
-    c.fillText('Upload a beat to see waveform', canvas.width/2, canvas.height/2);
-    return;
-  }
+  if (!buffer) return;
 
   const data = buffer.getChannelData(0);
   const step = Math.ceil(data.length / canvas.width);
   c.strokeStyle = '#0f0'; c.lineWidth = 2; c.beginPath();
-
   for (let i = 0; i < canvas.width; i++) {
     let sum = 0;
     for (let j = 0; j < step; j++) sum += Math.abs(data[i*step + j] || 0);
@@ -116,9 +108,9 @@ function drawWaveform(currentTime = 0) {
   }
   c.stroke();
 
-  // Playhead
-  if (isPlaying && buffer.duration) {
-    const progress = currentTime / buffer.duration;
+  // Moving Playhead
+  if (isPlaying) {
+    const progress = Math.min(currentTime / buffer.duration, 1);
     const x = progress * canvas.width;
     c.strokeStyle = '#00ffff'; c.lineWidth = 4;
     c.beginPath();
@@ -128,7 +120,6 @@ function drawWaveform(currentTime = 0) {
   }
 }
 
-// Play with real-time playhead
 async function play() {
   if (!buffer) return document.getElementById('status').textContent = "Load a beat first";
   await initAudio();
@@ -139,18 +130,18 @@ async function play() {
   source.connect(gainNode);
   source.start();
   isPlaying = true;
-  startTime = ctx.currentTime;
 
-  function updatePlayhead() {
+  const start = ctx.currentTime;
+
+  function update() {
     if (!isPlaying) return;
-    const currentTime = ctx.currentTime - startTime;
-    drawWaveform(currentTime);
-    animationFrame = requestAnimationFrame(updatePlayhead);
+    drawWaveform(ctx.currentTime - start);
+    animationFrame = requestAnimationFrame(update);
   }
-  updatePlayhead();
+  update();
 
-  document.getElementById('status').textContent = "Playing + Transcribing...";
   startTranscription();
+  document.getElementById('status').textContent = "Playing + Listening...";
 }
 
 function stop() {
@@ -164,18 +155,18 @@ function stop() {
 
 // Transcription
 function startTranscription() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) return;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return;
 
-  recognition = new SpeechRecognition();
+  recognition = new SR();
   recognition.continuous = true;
   recognition.interimResults = true;
   recognition.lang = 'en-US';
 
-  recognition.onresult = (event) => {
+  recognition.onresult = (e) => {
     let text = '';
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      text += event.results[i][0].transcript + ' ';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      text += e.results[i][0].transcript + ' ';
     }
     document.getElementById('lyricsOutput').value = text;
   };
@@ -183,7 +174,7 @@ function startTranscription() {
   recognition.start();
 }
 
-function manualTranscription() {
+function manualStart() {
   startTranscription();
 }
 
