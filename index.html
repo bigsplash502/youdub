@@ -5,25 +5,24 @@
 <title>YOUDUB 2025 • AI Music Studio</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
-  :root { --cyan:#0ff; --pink:#ff0066; --purple:#9e00ff; --green:#0f0; }
-  body { margin:0; padding:15px; min-height:100vh; background:linear-gradient(135deg,#000022,#220044); color:var(--cyan); font-family:system-ui,sans-serif; text-align:center; }
-  h1 { font-size:2.7em; text-shadow:0 0 20px #0ff; margin:10px 0; }
-  .card { background:rgba(0,20,60,0.9); border:2px solid var(--cyan); border-radius:16px; padding:20px; margin:15px auto; max-width:960px; box-shadow:0 0 30px rgba(0,255,255,0.3); }
+  :root { --cyan:#0ff; --pink:#ff0066; --purple:#9e00ff; }
+  body { margin:0; padding:15px; background:linear-gradient(135deg,#000022,#220044); color:var(--cyan); font-family:system-ui,sans-serif; text-align:center; }
+  h1 { font-size:2.8em; text-shadow:0 0 20px #0ff; margin:10px 0; }
+  .card { background:rgba(0,20,60,0.9); border:2px solid var(--cyan); border-radius:16px; padding:20px; margin:15px auto; max-width:960px; }
   button { padding:14px 28px; margin:8px; font-size:17px; cursor:pointer; background:linear-gradient(45deg,var(--pink),var(--purple)); color:white; border:none; border-radius:12px; }
   .big { padding:18px 50px; font-size:21px; background:linear-gradient(45deg,#00ff00,#00cc00); }
   .ad-btn { background:linear-gradient(45deg,#ffd700,#ffaa00); color:#000; font-weight:bold; }
   .status { padding:16px; background:#001122; border-radius:10px; font-size:18px; margin:10px 0; }
   canvas { width:100%; height:160px; background:#000; border:2px solid var(--cyan); border-radius:12px; margin:12px 0; }
   textarea { width:100%; background:#000; color:#0ff; border:1px solid #0ff; padding:12px; font-size:16px; border-radius:8px; min-height:180px; }
-  .credits { font-size:21px; font-weight:bold; color:#ffd700; }
 </style>
 </head>
 <body>
 <h1>YOUDUB 2025</h1>
-<p style="color:#ff00ff;">Create • Record • Transcribe</p>
+<p style="color:#ff00ff;">Beat • Record • Transcribe</p>
 
 <div class="card">
-  <div class="credits">💎 Credits: <span id="creditDisplay">25</span></div>
+  <strong>💎 Credits: <span id="creditDisplay">25</span></strong><br><br>
   <button onclick="watchAd()" class="ad-btn">🔥 WATCH AD → +15 Credits</button>
 </div>
 
@@ -31,63 +30,84 @@
   <h2>Load Beat</h2>
   <input type="file" id="file" accept="audio/*" style="display:none">
   <button onclick="document.getElementById('file').click()">📁 UPLOAD BEAT</button>
-  <button onclick="playSample()" class="big">LOAD DEMO BEAT</button>
+  <button onclick="playSample()" class="big">LOAD DEMO</button>
   <div class="status" id="status">Ready</div>
+</div>
+
+<div class="card">
+  <h2>Waveform + Loop</h2>
+  <canvas id="wave" width="800" height="160"></canvas>
+  <label>Start: <input type="number" id="loopStart" step="0.01" value="0"></label>
+  <label>End: <input type="number" id="loopEnd" step="0.01" value="30"></label>
+  <button id="loopBtn" onclick="toggleLoop()">LOOP: OFF</button>
+</div>
+
+<div class="card">
+  <button onclick="play()" class="big">▶ PLAY BEAT</button>
+  <button onclick="pause()">PAUSE</button>
+  <button onclick="stop()">STOP</button>
 </div>
 
 <div class="card">
   <h2>Live Transcription</h2>
   <button onclick="startFastRapMode()" class="big" style="background:#ff5500">⚡ FAST RAP MODE (-3)</button>
   <button onclick="stopLyricsCapture()">STOP</button>
-  <textarea id="lyricsOutput" rows="11" placeholder="Your lyrics appear here..."></textarea>
+  <textarea id="lyricsOutput" rows="10" placeholder="Lyrics will appear here..."></textarea>
 </div>
 
 <script>
-// Credit System
+// ====================== CREDITS ======================
 let credits = 25;
 function updateCredits() { document.getElementById('creditDisplay').textContent = credits; }
 
 function spendCredits(amount) {
-  if (credits < amount) {
-    alert("Not enough credits! Watch an ad.");
-    return false;
-  }
-  credits -= amount;
-  updateCredits();
-  return true;
+  if (credits < amount) { alert("Not enough credits!"); return false; }
+  credits -= amount; updateCredits(); return true;
 }
 
 function watchAd() {
-  if (confirm("Watch short ad for +15 credits?")) {
-    credits += 15;
-    updateCredits();
+  if (confirm("Watch ad for +15 credits?")) {
+    credits += 15; updateCredits();
     alert("✅ +15 Credits Added!");
   }
 }
 
-// File Upload Fix
-document.getElementById('file').onchange = async function(e) {
+// ====================== AUDIO ======================
+let ctx, buffer, source, gainNode;
+let isPlaying = false, isLooping = false;
+let loopStart = 0, loopEnd = 30, duration = 0;
+let recognition = null;
+
+async function initAudio() {
+  if (!ctx) {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    gainNode = ctx.createGain();
+    gainNode.connect(ctx.destination);
+  }
+  await ctx.resume();
+}
+
+// File Upload
+document.getElementById('file').onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   document.getElementById('status').textContent = `Loading ${file.name}...`;
   try {
-    const arrayBuf = await file.arrayBuffer();
-    await loadAudio(arrayBuf);
+    const buf = await file.arrayBuffer();
+    await loadAudio(buf);
   } catch(err) {
-    document.getElementById('status').textContent = "❌ Failed to load file";
+    document.getElementById('status').textContent = "❌ Load failed";
   }
 };
-
-let ctx, buffer;
-async function initAudio() {
-  if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
-  await ctx.resume();
-}
 
 async function loadAudio(arrayBuf) {
   await initAudio();
   buffer = await ctx.decodeAudioData(arrayBuf);
-  document.getElementById('status').textContent = `✅ Loaded ${buffer.duration.toFixed(1)}s beat`;
+  duration = buffer.duration;
+  loopEnd = Math.min(30, duration);
+  document.getElementById('loopEnd').value = loopEnd.toFixed(2);
+  drawWaveform();
+  document.getElementById('status').textContent = `✅ Loaded ${duration.toFixed(1)}s`;
 }
 
 async function playSample() {
@@ -95,17 +115,56 @@ async function playSample() {
   try {
     const resp = await fetch('https://www.learningcontainer.com/wp-content/uploads/2020/02/Kalimba.mp3');
     await loadAudio(await resp.arrayBuffer());
-  } catch(e) {
-    document.getElementById('status').textContent = "Demo failed";
+  } catch(e) { document.getElementById('status').textContent = "Demo failed"; }
+}
+
+// Waveform
+function drawWaveform() {
+  const canvas = document.getElementById('wave');
+  const c = canvas.getContext('2d');
+  c.fillStyle = '#000'; c.fillRect(0,0,canvas.width,canvas.height);
+  if (!buffer) return;
+  const data = buffer.getChannelData(0);
+  const step = Math.ceil(data.length / canvas.width);
+  c.strokeStyle = '#0f0'; c.lineWidth = 2; c.beginPath();
+  for (let i = 0; i < canvas.width; i++) {
+    let sum = 0;
+    for (let j = 0; j < step; j++) sum += Math.abs(data[i*step + j] || 0);
+    const y = canvas.height/2 * (1 - sum/step * 1.6);
+    i===0 ? c.moveTo(i,y) : c.lineTo(i,y);
   }
+  c.stroke();
+}
+
+// Playback
+async function play() {
+  if (!buffer) return document.getElementById('status').textContent = "Load a beat first";
+  await initAudio(); stop();
+  source = ctx.createBufferSource();
+  source.buffer = buffer;
+  if (isLooping && loopEnd > loopStart) {
+    source.loop = true;
+    source.loopStart = loopStart;
+    source.loopEnd = loopEnd;
+  }
+  source.connect(gainNode);
+  source.start(0, isLooping ? loopStart : 0);
+  isPlaying = true;
+  document.getElementById('status').textContent = isLooping ? 'LOOPING' : 'Playing';
+}
+function stop() { if (source) source.stop(); isPlaying = false; document.getElementById('status').textContent = 'Stopped'; }
+function pause() { stop(); }
+
+function toggleLoop() {
+  isLooping = !isLooping;
+  document.getElementById('loopBtn').textContent = isLooping ? 'LOOP: ON' : 'LOOP: OFF';
 }
 
 // Transcription
-let recognition = null;
 function startFastRapMode() {
   if (!spendCredits(3)) return;
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) return alert("Use Chrome browser");
+  if (!SpeechRecognition) return alert("Use Chrome");
 
   recognition = new SpeechRecognition();
   recognition.continuous = true;
@@ -129,7 +188,7 @@ function startFastRapMode() {
 
 function stopLyricsCapture() {
   if (recognition) recognition.stop();
-  document.getElementById('status').textContent = "Stopped";
+  document.getElementById('status').textContent = "Transcription stopped";
 }
 
 // Init
