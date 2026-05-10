@@ -8,12 +8,12 @@
   :root { --cyan:#0ff; --pink:#ff0066; --purple:#9e00ff; }
   body { margin:0; padding:15px; background:linear-gradient(135deg,#000022,#220044); color:var(--cyan); font-family:system-ui,sans-serif; text-align:center; }
   h1 { font-size:2.8em; text-shadow:0 0 20px #0ff; margin:10px 0; }
-  .card { background:rgba(0,20,60,0.9); border:2px solid var(--cyan); border-radius:16px; padding:20px; margin:15px auto; max-width:960px; }
+  .card { background:rgba(0,20,60,0.9); border:2px solid var(--cyan); border-radius:16px; padding:20px; margin:15px auto; max-width:960px; box-shadow:0 0 30px rgba(0,255,255,0.3); }
   button { padding:14px 28px; margin:8px; font-size:17px; cursor:pointer; background:linear-gradient(45deg,var(--pink),var(--purple)); color:white; border:none; border-radius:12px; }
   .big { padding:18px 50px; font-size:21px; background:linear-gradient(45deg,#00ff00,#00cc00); }
   .ad-btn { background:linear-gradient(45deg,#ffd700,#ffaa00); color:#000; font-weight:bold; }
   .status { padding:16px; background:#001122; border-radius:10px; font-size:18px; margin:10px 0; }
-  canvas { width:100%; height:160px; background:#000; border:2px solid var(--cyan); border-radius:12px; margin:12px 0; }
+  canvas { width:100%; height:180px; background:#000; border:2px solid var(--cyan); border-radius:12px; margin:12px 0; }
   textarea { width:100%; background:#000; color:#0ff; border:1px solid #0ff; padding:12px; font-size:16px; border-radius:8px; min-height:180px; }
 </style>
 </head>
@@ -36,23 +36,25 @@
 
 <div class="card">
   <h2>Waveform + Loop</h2>
-  <canvas id="wave" width="800" height="160"></canvas>
-  <label>Start: <input type="number" id="loopStart" step="0.01" value="0"></label>
-  <label>End: <input type="number" id="loopEnd" step="0.01" value="30"></label>
+  <canvas id="wave" width="800" height="180"></canvas>
+  <div style="margin:8px 0;">
+    Start: <input type="number" id="loopStart" step="0.01" value="0">s &nbsp;&nbsp;
+    End: <input type="number" id="loopEnd" step="0.01" value="30">s
+  </div>
   <button id="loopBtn" onclick="toggleLoop()">LOOP: OFF</button>
 </div>
 
 <div class="card">
-  <button onclick="play()" class="big">▶ PLAY BEAT</button>
+  <button onclick="play()" class="big">▶ PLAY / LOOP</button>
   <button onclick="pause()">PAUSE</button>
   <button onclick="stop()">STOP</button>
 </div>
 
 <div class="card">
   <h2>Live Transcription</h2>
-  <button onclick="startFastRapMode()" class="big" style="background:#ff5500">⚡ FAST RAP MODE (-3)</button>
+  <button onclick="startFastRapMode()" class="big" style="background:#ff5500">⚡ FAST RAP MODE</button>
   <button onclick="stopLyricsCapture()">STOP</button>
-  <textarea id="lyricsOutput" rows="10" placeholder="Lyrics will appear here..."></textarea>
+  <textarea id="lyricsOutput" rows="10" placeholder="Your lyrics will appear here..."></textarea>
 </div>
 
 <script>
@@ -60,22 +62,11 @@
 let credits = 25;
 function updateCredits() { document.getElementById('creditDisplay').textContent = credits; }
 
-function spendCredits(amount) {
-  if (credits < amount) { alert("Not enough credits!"); return false; }
-  credits -= amount; updateCredits(); return true;
-}
-
-function watchAd() {
-  if (confirm("Watch ad for +15 credits?")) {
-    credits += 15; updateCredits();
-    alert("✅ +15 Credits Added!");
-  }
-}
-
-// ====================== AUDIO ======================
+// ====================== AUDIO CORE ======================
 let ctx, buffer, source, gainNode;
 let isPlaying = false, isLooping = false;
 let loopStart = 0, loopEnd = 30, duration = 0;
+let animationFrame = null;
 let recognition = null;
 
 async function initAudio() {
@@ -96,7 +87,7 @@ document.getElementById('file').onchange = async (e) => {
     const buf = await file.arrayBuffer();
     await loadAudio(buf);
   } catch(err) {
-    document.getElementById('status').textContent = "❌ Load failed";
+    document.getElementById('status').textContent = "❌ Failed to load file";
   }
 };
 
@@ -118,15 +109,18 @@ async function playSample() {
   } catch(e) { document.getElementById('status').textContent = "Demo failed"; }
 }
 
-// Waveform
-function drawWaveform() {
+// Waveform with real-time playhead
+function drawWaveform(currentTime = 0) {
   const canvas = document.getElementById('wave');
   const c = canvas.getContext('2d');
   c.fillStyle = '#000'; c.fillRect(0,0,canvas.width,canvas.height);
+  
   if (!buffer) return;
+
   const data = buffer.getChannelData(0);
   const step = Math.ceil(data.length / canvas.width);
   c.strokeStyle = '#0f0'; c.lineWidth = 2; c.beginPath();
+  
   for (let i = 0; i < canvas.width; i++) {
     let sum = 0;
     for (let j = 0; j < step; j++) sum += Math.abs(data[i*step + j] || 0);
@@ -134,12 +128,22 @@ function drawWaveform() {
     i===0 ? c.moveTo(i,y) : c.lineTo(i,y);
   }
   c.stroke();
+
+  // Playhead
+  if (isPlaying && duration) {
+    const x = (currentTime / duration) * canvas.width;
+    c.strokeStyle = '#00ffff'; c.lineWidth = 3;
+    c.beginPath();
+    c.moveTo(x, 0); c.lineTo(x, canvas.height);
+    c.stroke();
+  }
 }
 
-// Playback
+// Playback with real-time update
 async function play() {
   if (!buffer) return document.getElementById('status').textContent = "Load a beat first";
   await initAudio(); stop();
+
   source = ctx.createBufferSource();
   source.buffer = buffer;
   if (isLooping && loopEnd > loopStart) {
@@ -150,9 +154,29 @@ async function play() {
   source.connect(gainNode);
   source.start(0, isLooping ? loopStart : 0);
   isPlaying = true;
+
+  const startTime = ctx.currentTime - (isLooping ? loopStart : 0);
+
+  function update() {
+    if (!isPlaying) return;
+    const elapsed = ctx.currentTime - startTime;
+    const current = isLooping ? (elapsed % (loopEnd - loopStart)) + loopStart : elapsed;
+    drawWaveform(current);
+    animationFrame = requestAnimationFrame(update);
+  }
+  update();
+
   document.getElementById('status').textContent = isLooping ? 'LOOPING' : 'Playing';
 }
-function stop() { if (source) source.stop(); isPlaying = false; document.getElementById('status').textContent = 'Stopped'; }
+
+function stop() {
+  if (source) source.stop();
+  isPlaying = false;
+  cancelAnimationFrame(animationFrame);
+  drawWaveform(0);
+  document.getElementById('status').textContent = 'Stopped';
+}
+
 function pause() { stop(); }
 
 function toggleLoop() {
@@ -162,9 +186,8 @@ function toggleLoop() {
 
 // Transcription
 function startFastRapMode() {
-  if (!spendCredits(3)) return;
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) return alert("Use Chrome");
+  if (!SpeechRecognition) return alert("Please use Chrome browser");
 
   recognition = new SpeechRecognition();
   recognition.continuous = true;
@@ -183,7 +206,7 @@ function startFastRapMode() {
   };
 
   recognition.start();
-  document.getElementById('status').textContent = "🎤 Listening...";
+  document.getElementById('status').textContent = "🎤 Listening... (Fast Mode)";
 }
 
 function stopLyricsCapture() {
